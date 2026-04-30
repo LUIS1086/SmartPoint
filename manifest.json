@@ -1,0 +1,64 @@
+{
+    "name": "Smart Point",
+    "short_name": "Smart Point",
+    "description": "Sistema de gestión multi-sucursal · Celulares, repuestos y reparación",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#08090f",
+    "theme_color": "#0ea5e9",
+    "lang": "es-CO",
+    "dir": "ltr",
+    "categories": ["business", "productivity", "utilities"],
+    "icons": [
+        {
+            "src": "icons/icon-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "icons/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "icons/icon-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Nueva orden",
+            "short_name": "Nueva orden",
+            "description": "Registrar una nueva orden de reparación",
+            "url": "/?shortcut=taller",
+            "icons": [{ "src": "icons/icon-192x192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Ventas",
+            "short_name": "Ventas",
+            "description": "Registrar ventas e inventario",
+            "url": "/?shortcut=ventas",
+            "icons": [{ "src": "icons/icon-192x192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Inventario",
+            "short_name": "Inventario",
+            "description": "Stock y existencias",
+            "url": "/?shortcut=stock",
+            "icons": [{ "src": "icons/icon-192x192.png", "sizes": "192x192" }]
+        }
+    ],
+    "prefer_related_applications": false
+}
