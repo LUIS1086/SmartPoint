@@ -6154,6 +6154,53 @@
             };
         }
         function getCurrentSucursalName() { return getSucursalNames()[currentSucursal] || 'Smart Point'; }
+
+        // ════════════════════════════════════════════════════════════════
+        // SMART POINT · AISLAMIENTO POR SUCURSAL
+        // ────────────────────────────────────────────────────────────────
+        // Helper único: filtra cualquier array por la sucursal actual.
+        // Tratamiento legacy: registros sin sucursal se asignan a '1'
+        // (Smart Point, la sede principal) para que datos viejos no
+        // desaparezcan de la vista.
+        // ════════════════════════════════════════════════════════════════
+        function _itemSucursal(item) {
+            // Normaliza: si no tiene sucursal, es legacy → sede '1'
+            const s = item && item.sucursal;
+            return (s === '1' || s === '2' || s === '3') ? s : '1';
+        }
+        function filterBySucursal(arr, sucursalId) {
+            const target = sucursalId || currentSucursal;
+            if (!Array.isArray(arr)) return [];
+            return arr.filter(item => _itemSucursal(item) === target);
+        }
+        // Variantes específicas por claridad en sitios de uso
+        async function getStockSucursal(sucursalId) {
+            const all = await getAll('stock');
+            return filterBySucursal(all, sucursalId);
+        }
+        async function getOrdersSucursal(sucursalId) {
+            const all = await getAll('orders');
+            return filterBySucursal(all, sucursalId);
+        }
+        async function getSalesSucursal(sucursalId) {
+            const all = await getAll('sales');
+            return filterBySucursal(all, sucursalId);
+        }
+        async function getGastosSucursal(sucursalId) {
+            const all = await getAll('gastos');
+            return filterBySucursal(all, sucursalId);
+        }
+
+        // Caja por sede: cada sucursal tiene su propio "último cierre"
+        function getLastCierreSucursal(sucursalId) {
+            const id = sucursalId || currentSucursal;
+            return Number(localStorage.getItem('smartpoint.lastCierreCaja.' + id)) || 0;
+        }
+        function setLastCierreSucursal(sucursalId, ts) {
+            const id = sucursalId || currentSucursal;
+            localStorage.setItem('smartpoint.lastCierreCaja.' + id, String(ts));
+        }
+
         // Filtro de stats: 'all' o '1'/'2'/'3'
         let _statsSucursalFilter = 'all';
         function getSucursalColor(id) {
@@ -6858,7 +6905,7 @@
         // Esto previene desincronización entre lecturas/escrituras.
         async function _migrateStockFields() {
             try {
-                const items = await getAll('stock');
+                const items = await getStockSucursal();
                 let migrated = 0;
                 for (const s of items) {
                     let changed = false;
@@ -7128,10 +7175,11 @@
 
             try {
                 if (!silent) updateDriveProgress(0, 0, 0, 'Leyendo base de datos...');
-                const orders   = await getAll('orders');
-                const stock    = await getAll('stock');
-                const sales    = await getAll('sales');
-                const gastos   = await getAll('gastos');
+                // SMART POINT: dashboards filtrados por sede activa
+                const orders   = await getOrdersSucursal();
+                const stock    = await getStockSucursal();
+                const sales    = await getSalesSucursal();
+                const gastos   = await getGastosSucursal();
                 const clientes = await getAll('clientes');
                 const payments = await getAll('payments');
                 const calificaciones = await getAll('calificaciones');
@@ -7220,10 +7268,11 @@
 
         // Modificar updateTotal, etc. (resto del código igual excepto funciones de mejora 6 y 7)
         async function updateTotal() {
-            const lastCierre = Number(localStorage.getItem('lastCierreCaja')) || 0;
-            const orders = await getAll('orders');
-            const sales = await getAll('sales');
-            const gastos = await getAll('gastos');
+            // SMART POINT: caja independiente por sede
+            const lastCierre = getLastCierreSucursal();
+            const orders = await getOrdersSucursal();
+            const sales = await getSalesSucursal();
+            const gastos = await getGastosSucursal();
             const totalOrders = orders.filter(o => o.sta === 'entregado' && (o.fechaEntrega || o.fecha) > lastCierre).reduce((a,b) => a + (b.val||0), 0);
             const totalSales = sales.filter(v => v.fecha > lastCierre && v.tipo !== 'adelanto' && v.tipo !== 'cobro_entrega').reduce((a,b) => a + (b.val||0), 0);
             const totalGastos = gastos.filter(g => g.fecha > lastCierre).reduce((a,b) => a + (b.val||0), 0);
@@ -8009,6 +8058,8 @@
 
             const cur = getCurrency();
             let orders = await getAll('orders');
+            // SMART POINT: solo órdenes de la sucursal activa
+            orders = filterBySucursal(orders);
 
             // FILTROS ESTRICTOS (tienen prioridad sobre texto libre)
             if (filters.exactOrderId) {
@@ -8343,7 +8394,7 @@
             // Solo si: (a) es transición hacia reparado, (b) no tiene partsUsed todavía, (c) hay stock disponible
             if (newSta === 'reparado' && oldSta !== 'reparado' && !Array.isArray(o.partsUsed)) {
                 try {
-                    const stockAll = await getAll('stock');
+                    const stockAll = await getStockSucursal();
                     if (stockAll.length > 0) {
                         // Pequeña pausa para que el renderOrders termine primero
                         setTimeout(() => {
@@ -8710,9 +8761,10 @@
 
         async function renderMovimientos() {
             const cur = getCurrency();
-            const lastCierre = Number(localStorage.getItem('lastCierreCaja')) || 0;
-            const sales = await getAll('sales');
-            const gastos = await getAll('gastos');
+            // SMART POINT: movimientos filtrados por sede activa
+            const lastCierre = getLastCierreSucursal();
+            const sales = await getSalesSucursal();
+            const gastos = await getGastosSucursal();
             const movs = [...sales.filter(s=>s.fecha>lastCierre && s.tipo!=='adelanto' && s.tipo!=='cobro_entrega').map(s=>({...s,type:'sale'})), ...gastos.filter(g=>g.fecha>lastCierre).map(g=>({...g,type:'gasto'}))].sort((a,b)=>b.fecha-a.fecha);
             const container = document.getElementById('movimientos-history');
             if(!movs.length) { container.innerHTML = '<div class="text-center py-4 text-slate-500 text-xs">Sin movimientos en la caja actual</div>'; return; }
@@ -8725,7 +8777,9 @@
 
         async function renderStock() {
             // Una sola lectura del stock (antes se llamaba getAll 3 veces seguidas)
-            const allStock = await getAll('stock');
+            // SMART POINT: filtramos por sucursal activa. Cada sede ve solo su stock.
+            const allStockGlobal = await getAll('stock');
+            const allStock = filterBySucursal(allStockGlobal);
             let stock = allStock.slice();
             const st   = (document.getElementById('stock-search')?.value || '').toLowerCase();
             const sort = document.getElementById('stock-sort')?.value || 'name';
@@ -8954,8 +9008,17 @@
             if (isNaN(q) || q<0) return showAlert('Cantidad inválida.', 'warning');
 
             const isNew  = !id;
-            const prevQ  = isNew ? 0 : ((await getAll('stock')).find(s=>s.id==parseInt(id))?.q || 0);
-            const itemData = { id: id ? parseInt(id) : Date.now(), n, p, q, cost, code, cat, minStock, supplier, notes, img };
+            const allStockNow = await getAll('stock');
+            const existing = isNew ? null : allStockNow.find(s => s.id == parseInt(id));
+            const prevQ  = isNew ? 0 : (existing?.q || 0);
+            // SMART POINT: el producto pertenece a la sucursal donde se creó.
+            // Al editar, mantener su sucursal original (no cambia aunque cambies de sede).
+            const itemSucursal = (existing && _itemSucursal(existing)) || currentSucursal;
+            const itemData = {
+                id: id ? parseInt(id) : Date.now(),
+                n, p, q, cost, code, cat, minStock, supplier, notes, img,
+                sucursal: itemSucursal
+            };
             await put('stock', itemData);
 
             if (!isNew && q !== prevQ) {
@@ -8992,7 +9055,7 @@
         }
 
         async function openStockHistory(id) {
-            const stock = await getAll('stock');
+            const stock = await getStockSucursal();
             const item  = stock.find(s => s.id === id);
             if (!item) return;
             document.getElementById('stock-history-name').innerText = item.n;
@@ -9120,7 +9183,8 @@
         }
 
         async function updateVentaSelect() {
-            const stock = await getAll('stock');
+            // SMART POINT: solo productos de la sucursal activa
+            const stock = await getStockSucursal();
             document.getElementById('v-select').innerHTML =
                 '<option value="">-- Seleccionar producto --</option>' +
                 stock.filter(s => s.q > 0).sort((a,b)=>a.n.localeCompare(b.n))
@@ -9162,7 +9226,7 @@
         }
 
         async function renderProductPicker() {
-            const stock = await getAll('stock');
+            const stock = await getStockSucursal();
             const list = document.getElementById('pp-list');
             if (!list) return;
             const q = _ppNormalize((document.getElementById('pp-search')?.value || '').trim());
@@ -9454,7 +9518,7 @@
             // Refrescar tarjeta
             const sel = document.getElementById('v-select');
             if (sel && sel.value) {
-                const stock = await getAll('stock');
+                const stock = await getStockSucursal();
                 const item = stock.find(s => String(s.id) === String(sel.value));
                 if (item) showPriceCard(item);
             }
@@ -9477,7 +9541,8 @@
             const id  = document.getElementById('v-select').value;
             const qty = parseInt(document.getElementById('v-qty').value);
             if (!id || isNaN(qty) || qty <= 0) return showAlert('Selecciona un producto e ingresa una cantidad válida.', 'warning');
-            const stock = await getAll('stock');
+            // SMART POINT: validar que el producto sea de la sucursal activa
+            const stock = await getStockSucursal();
             const item  = stock.find(x => x.id == id);
             if (!item || qty > item.q) return showAlert('Stock insuficiente para esta cantidad.', 'error');
 
@@ -9545,8 +9610,9 @@
         }
         function closeConfirmModal() { document.getElementById('modal-confirm').classList.add('hidden'); }
         async function openCajaModal() {
-            const lastCierre = Number(localStorage.getItem('lastCierreCaja')) || 0;
-            const orders = await getAll('orders'); const sales = await getAll('sales'); const gastos = await getAll('gastos');
+            // SMART POINT: caja independiente por sede
+            const lastCierre = getLastCierreSucursal();
+            const orders = await getOrdersSucursal(); const sales = await getSalesSucursal(); const gastos = await getGastosSucursal();
             const cur = getCurrency();
             const tOrders = orders.filter(o => o.sta === 'entregado' && (o.fechaEntrega || o.fecha) > lastCierre).reduce((a,b) => a + (b.val||0), 0);
             const tSales = sales.filter(v => v.fecha > lastCierre && v.tipo !== 'adelanto' && v.tipo !== 'cobro_entrega').reduce((a,b) => a + (b.val||0), 0);
@@ -9565,7 +9631,13 @@
             document.getElementById('modal-caja').classList.remove('hidden');
         }
         function closeCajaModal() { document.getElementById('modal-caja').classList.add('hidden'); }
-        function executeCierreCaja() { localStorage.setItem('lastCierreCaja', Date.now()); updateTotal(); closeConfirmModal(); showAlert("Caja reiniciada correctamente.", "success"); }
+        function executeCierreCaja() {
+            // SMART POINT: cierra caja SOLO de la sucursal actual
+            setLastCierreSucursal(currentSucursal, Date.now());
+            updateTotal();
+            closeConfirmModal();
+            showAlert("✅ Caja de " + getCurrentSucursalName() + " reiniciada.\n\nLas otras sedes mantienen su caja independiente.", "success");
+        }
 
         // ════════════════════════════════════════════════════════════════════════
         // MODAL GARANTÍAS — Vista visual de equipos con garantía activa
@@ -11455,7 +11527,7 @@
                     const diff    = newQty - prevQty;  // positivo = salida extra; negativo = devolución al stock
                     if (diff === 0) continue;
 
-                    const stockAll = await getAll('stock');
+                    const stockAll = await getStockSucursal();
                     const stockItem = stockAll.find(s => s.id === stockId);
                     if (!stockItem) continue;
                     stockItem.q = Math.max(0, (stockItem.q || 0) - diff);
@@ -12732,7 +12804,7 @@
                 tabHistorico.style.background = 'transparent';
                 tabHistorico.style.color = '#94a3b8';
                 tabHistorico.style.boxShadow = 'none';
-                if (hint) hint.textContent = 'Movimientos desde el último cierre de caja';
+                if (hint) hint.textContent = 'Movimientos de ' + getCurrentSucursalName() + ' · desde el último cierre';
             } else {
                 tabHistorico.style.background = 'linear-gradient(135deg,#7c3aed,#a855f7)';
                 tabHistorico.style.color = '#fff';
@@ -12754,10 +12826,11 @@
         }
 
         async function _loadMovimientosByScope() {
-            const lastCierre = Number(localStorage.getItem('lastCierreCaja')) || 0;
-            const sales  = await getAll('sales');
-            const gastos = await getAll('gastos');
-            const orders = await getAll('orders');
+            // SMART POINT: filtrado por sede activa
+            const lastCierre = getLastCierreSucursal();
+            const sales  = await getSalesSucursal();
+            const gastos = await getGastosSucursal();
+            const orders = await getOrdersSucursal();
             // Si el scope es "actual", filtramos por > lastCierre. Si es "histórico", traemos TODO.
             const passes = (ts) => _movScope === 'historico' ? true : (ts > lastCierre);
             const movSales   = sales.filter(s => passes(s.fecha) && s.tipo !== 'adelanto' && s.tipo !== 'cobro_entrega').map(s => ({ ...s, type: 'sale',    fecha: s.fecha }));
@@ -15767,15 +15840,22 @@
             modal.classList.remove('hidden');
         }
 
-        // Permite cambiar de sucursal en cualquier momento desde el badge del header
-        function openSucursalSwitcher() {
-            showSucursalPicker(() => {
+        // Permite cambiar de sucursal en cualquier momento desde el badge del header.
+        // Al cambiar se refresca TODA la app: stock, órdenes, caja, ventas, home.
+        async function openSucursalSwitcher() {
+            showSucursalPicker(async () => {
                 if (typeof showToast === 'function') {
                     showToast('🏪 Trabajando en ' + getCurrentSucursalName(), 'success');
                 }
-                // Refrescar la vista actual para que filtros/contadores reflejen la nueva sede
-                if (typeof updateTotal === 'function') updateTotal();
-                if (typeof renderOrders === 'function') renderOrders();
+                // Refresh completo en paralelo (lo que exista en el contexto)
+                const tasks = [];
+                if (typeof updateTotal === 'function')        tasks.push(updateTotal());
+                if (typeof renderOrders === 'function')       tasks.push(renderOrders());
+                if (typeof renderStock === 'function')        tasks.push(renderStock());
+                if (typeof updateVentaSelect === 'function')  tasks.push(updateVentaSelect());
+                if (typeof renderMovimientos === 'function')  tasks.push(renderMovimientos());
+                if (typeof updateMetaBar === 'function')      tasks.push(updateMetaBar());
+                try { await Promise.allSettled(tasks); } catch(e) {}
             });
         }
         window.openSucursalSwitcher = openSucursalSwitcher;
@@ -16804,7 +16884,7 @@
                 const deudores     = clientes.filter(c => c.deuda > 0);
                 const totalDeuda   = deudores.reduce((a,b) => a + (b.deuda||0), 0);
                 const lastBackup   = localStorage.getItem('smartpoint.driveLastBackup');
-                const lastCierre   = Number(localStorage.getItem('lastCierreCaja')) || 0;
+                const lastCierre   = getLastCierreSucursal();
                 const diasSinCierre = Math.floor((Date.now() - lastCierre) / 86400000);
 
                 // Estimar tamaño en IndexedDB
