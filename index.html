@@ -12990,11 +12990,11 @@
         }
 
         // ==================== GOOGLE DRIVE ====================
-        // Drive Client ID — override opcional desde localStorage si Luis crea uno
-        // separado para Smart Point en Google Cloud Console. Default: el actual.
+        // Drive Client ID — Client ID propio de Smart Point (proyecto separado de NelsonApp).
+        // Override opcional desde localStorage si en el futuro Luis crea uno nuevo.
         const DRIVE_CLIENT_ID = (function() {
             const override = localStorage.getItem('smartpoint.driveClientId');
-            return (override && override.trim()) || '1048860878818-srq77k0q63bbka6p9k0m55jah31gkmnt.apps.googleusercontent.com';
+            return (override && override.trim()) || '648779760419-bge6slb11t8t0k5566coc9ljbpva86b7.apps.googleusercontent.com';
         })();
         const DRIVE_SCOPES    = 'https://www.googleapis.com/auth/drive.file';
         const DRIVE_FOLDER    = 'SmartPoint_Backups';
