@@ -1,1 +1,8 @@
-
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.vercel.smart_point_one.twa",
+        "sha256_cert_fingerprints": ["27:94:52:6A:3D:FF:9A:2C:08:B4:05:6C:36:89:95:B0:C9:FB:06:5D:61:37:B8:29:70:62:77:5A:42:58:EB:6E"]
+      }
+    }]
