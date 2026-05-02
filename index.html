@@ -3686,6 +3686,9 @@
                 <button class="export-range-chip" data-range="year" onclick="setExportRange('year')">Este año</button>
                 <button class="export-range-chip" data-range="all" onclick="setExportRange('all')">Todo</button>
             </div>
+            <!-- Sucursal Smart Point -->
+            <p class="export-section-label" style="padding:14px 16px 0;margin:0;">Sucursal</p>
+            <div class="export-range-chips" id="export-sucursal-chips" style="padding-top:8px;"></div>
             <!-- Opciones -->
             <div class="export-body">
                 <p class="export-section-label">¿Qué quieres exportar?</p>
@@ -3726,7 +3729,7 @@
                     <div class="export-opt-icon" style="background:linear-gradient(135deg,rgba(14,165,233,0.3),rgba(154,52,18,0.2));">📊</div>
                     <div class="export-opt-text">
                         <p class="export-opt-title">Reporte financiero</p>
-                        <p class="export-opt-sub">Resumen ejecutivo del mes actual</p>
+                        <p class="export-opt-sub" id="exp-sub-reporte">Resumen ejecutivo del periodo</p>
                     </div>
                     <div class="export-opt-count" id="exp-count-reporte">
                         <span style="font-size:12px;">📅</span>
@@ -16434,6 +16437,48 @@
         // ==================== EXPORTAR DATOS v2 ====================
         let _exportFmt = 'pdf';
         let _exportRange = 'month'; // month | prevmonth | 3months | year | all
+        let _exportSucursalFilter = 'all'; // 'all' | '1' | '2' | '3' — se inicializa al abrir
+
+        // SMART POINT: render de chips de sucursal en el modal de exportar
+        function _renderExportSucursalChips() {
+            const wrap = document.getElementById('export-sucursal-chips');
+            if (!wrap) return;
+            const names = getSucursalNames();
+            const chips = [
+                { val: 'all', label: '🏪 Todas', color: '#94a3b8' },
+                { val: '1',   label: names['1'], color: getSucursalColor('1') },
+                { val: '2',   label: names['2'], color: getSucursalColor('2') },
+                { val: '3',   label: names['3'], color: getSucursalColor('3') },
+            ];
+            wrap.innerHTML = chips.map(c => {
+                const active = _exportSucursalFilter === c.val;
+                const bg     = active ? c.color : c.color + '14';
+                const text   = active ? '#fff'  : c.color;
+                const border = active ? c.color : c.color + '55';
+                return `<button onclick="setExportSucursal('${c.val}')"
+                        style="flex-shrink:0;padding:6px 12px;border-radius:99px;background:${bg};border:1px solid ${border};color:${text};font-size:10px;font-weight:900;letter-spacing:0.5px;cursor:pointer;white-space:nowrap;transition:all 0.15s ease;">
+                        ${escAttr(c.label)}
+                    </button>`;
+            }).join('');
+        }
+        function setExportSucursal(val) {
+            _exportSucursalFilter = val;
+            _renderExportSucursalChips();
+            _updateExportCounts();
+        }
+        // Helper: aplica filtro de sucursal a cualquier array de la BD
+        function _applyExportSucursalFilter(arr) {
+            if (!Array.isArray(arr)) return [];
+            if (_exportSucursalFilter === 'all') return arr;
+            return arr.filter(item => _itemSucursal(item) === _exportSucursalFilter);
+        }
+        // Slug de sucursal para nombre de archivo
+        function _exportSucursalSlug() {
+            if (_exportSucursalFilter === 'all') return 'todas';
+            const names = getSucursalNames();
+            const raw = names[_exportSucursalFilter] || ('sede' + _exportSucursalFilter);
+            return raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,24);
+        }
 
         // Calcula timestamps de inicio/fin según el rango elegido
         function _getExportRange() {
@@ -16485,8 +16530,11 @@
         function openExportPanel() {
             _exportFmt = 'pdf';
             _exportRange = 'month';
+            // Por defecto: la sucursal en la que está trabajando el usuario
+            _exportSucursalFilter = (currentSucursal === '1' || currentSucursal === '2' || currentSucursal === '3') ? currentSucursal : 'all';
             setExportFmt('pdf');
             setExportRange('month');
+            _renderExportSucursalChips();
             document.getElementById('modal-export-panel').classList.remove('hidden');
         }
         function closeExportPanel() {
@@ -16515,11 +16563,14 @@
         async function _updateExportCounts() {
             try {
                 const { from, to, label } = _getExportRange();
+                const sucName = _exportSucursalFilter === 'all'
+                    ? 'Todas las sedes'
+                    : (getSucursalNames()[_exportSucursalFilter] || ('Sede ' + _exportSucursalFilter));
                 const footer = document.getElementById('export-footer-range');
-                if (footer) footer.textContent = `📅 ${label}`;
+                if (footer) footer.textContent = `📅 ${label} · 🏪 ${sucName}`;
 
-                // Órdenes: filtrar por fecha de creación dentro del rango
-                const orders = await getAll('orders');
+                // Órdenes: filtrar por sucursal y por fecha de creación dentro del rango
+                const orders = _applyExportSucursalFilter(await getAll('orders'));
                 const ordenesFiltradas = orders.filter(o => {
                     const f = o.fecha || 0;
                     return f >= from && f <= to;
@@ -16530,8 +16581,8 @@
                 if (boxOrd) boxOrd.classList.toggle('export-opt-count-empty', ordenesFiltradas.length === 0);
 
                 // Ventas + gastos
-                const sales  = await getAll('sales');
-                const gastos = (await getAll('gastos')) || [];
+                const sales  = _applyExportSucursalFilter(await getAll('sales'));
+                const gastos = _applyExportSucursalFilter((await getAll('gastos')) || []);
                 const salesFilt  = sales.filter(s  => (s.fecha || 0) >= from && (s.fecha || 0) <= to);
                 const gastosFilt = gastos.filter(g => (g.fecha || 0) >= from && (g.fecha || 0) <= to);
                 const totalMovs = salesFilt.length + gastosFilt.length;
@@ -16540,18 +16591,35 @@
                 if (numVen) numVen.textContent = totalMovs;
                 if (boxVen) boxVen.classList.toggle('export-opt-count-empty', totalMovs === 0);
 
-                // Inventario (snapshot, no se filtra por fecha)
-                const stock = await getAll('stock');
+                // Inventario (snapshot, no se filtra por fecha pero sí por sucursal)
+                const stock = _applyExportSucursalFilter(await getAll('stock'));
                 const numInv = document.getElementById('exp-num-inventario');
                 const boxInv = document.getElementById('exp-count-inventario');
                 if (numInv) numInv.textContent = stock.length;
                 if (boxInv) boxInv.classList.toggle('export-opt-count-empty', stock.length === 0);
 
-                // Reporte: siempre del mes actual
+                // Reporte: refleja el rango seleccionado + sucursal
                 const meses3 = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-                const now = new Date();
                 const repLabel = document.getElementById('exp-num-reporte');
-                if (repLabel) repLabel.textContent = meses3[now.getMonth()] + ' ' + now.getFullYear();
+                const repSub   = document.getElementById('exp-sub-reporte');
+                const nowR = new Date();
+                if (_exportRange === 'month') {
+                    if (repLabel) repLabel.textContent = meses3[nowR.getMonth()] + ' ' + nowR.getFullYear();
+                    if (repSub)   repSub.textContent   = 'Resumen ejecutivo del mes actual';
+                } else if (_exportRange === 'prevmonth') {
+                    const prev = new Date(nowR.getFullYear(), nowR.getMonth() - 1, 1);
+                    if (repLabel) repLabel.textContent = meses3[prev.getMonth()] + ' ' + prev.getFullYear();
+                    if (repSub)   repSub.textContent   = 'Resumen ejecutivo del mes pasado';
+                } else if (_exportRange === '3months') {
+                    if (repLabel) repLabel.textContent = '3 meses';
+                    if (repSub)   repSub.textContent   = 'Resumen ejecutivo trimestral';
+                } else if (_exportRange === 'year') {
+                    if (repLabel) repLabel.textContent = String(nowR.getFullYear());
+                    if (repSub)   repSub.textContent   = 'Resumen ejecutivo anual';
+                } else if (_exportRange === 'all') {
+                    if (repLabel) repLabel.textContent = 'Todo';
+                    if (repSub)   repSub.textContent   = 'Resumen ejecutivo histórico';
+                }
             } catch(e) { console.warn('[_updateExportCounts]', e); }
         }
 
@@ -16571,60 +16639,69 @@
                 let rows = [], headers = [], filename = '';
 
                 if (type === 'ordenes') {
-                    let orders = await getAll('orders');
+                    let orders = _applyExportSucursalFilter(await getAll('orders'));
                     orders = orders.filter(o => (o.fecha || 0) >= from && (o.fecha || 0) <= to);
-                    headers = ['#Orden','Cliente','Teléfono','Equipo','Falla','Estado','Valor','Adelanto','Saldo','Fecha','Entrega Estimada','Técnico'];
+                    headers = ['#Orden','Cliente','Teléfono','Equipo','Falla','Estado','Valor','Adelanto','Saldo','Fecha','Entrega Estimada','Técnico','Sucursal'];
+                    const _sucNames = getSucursalNames();
                     rows = orders.map((o,i) => [
                         i+1, o.nom||'', o.tel||'', o.equ||'', (o.fal||'').replace(/,/g,' '),
                         o.sta||'', o.val||0, o.adelanto||0, (o.val||0)-(o.adelanto||0),
                         o.fecha ? new Date(o.fecha).toLocaleDateString('es-CO') : '',
                         o.deadline ? new Date(o.deadline).toLocaleDateString('es-CO') : '',
-                        o.tecnico||''
+                        o.tecnico||'',
+                        _sucNames[_itemSucursal(o)] || ''
                     ]);
-                    filename = `ordenes_${rangeSlug}`;
+                    filename = `ordenes_${rangeSlug}_${_exportSucursalSlug()}`;
                 } else if (type === 'ventas') {
-                    let sales = await getAll('sales');
-                    let gastos = (await getAll('gastos')) || [];
+                    let sales  = _applyExportSucursalFilter(await getAll('sales'));
+                    let gastos = _applyExportSucursalFilter((await getAll('gastos')) || []);
                     sales  = sales.filter(s  => (s.fecha || 0) >= from && (s.fecha || 0) <= to);
                     gastos = gastos.filter(g => (g.fecha || 0) >= from && (g.fecha || 0) <= to);
-                    headers = ['Tipo','Descripción','Ítem','Cantidad','Valor','Fecha'];
-                    const saleRows = sales.map(s => [s.tipo||'venta', s.det||s.item||'', s.item||'', s.qty||1, s.val||0, s.fecha ? new Date(s.fecha).toLocaleDateString('es-CO') : '']);
-                    const gastoRows = gastos.map(g => ['gasto', g.det||'', '', 1, -(g.val||0), g.fecha ? new Date(g.fecha).toLocaleDateString('es-CO') : '']);
+                    headers = ['Tipo','Descripción','Ítem','Cantidad','Valor','Fecha','Sucursal'];
+                    const _sucNames = getSucursalNames();
+                    const saleRows = sales.map(s => [s.tipo||'venta', s.det||s.item||'', s.item||'', s.qty||1, s.val||0, s.fecha ? new Date(s.fecha).toLocaleDateString('es-CO') : '', _sucNames[_itemSucursal(s)] || '']);
+                    const gastoRows = gastos.map(g => ['gasto', g.det||'', '', 1, -(g.val||0), g.fecha ? new Date(g.fecha).toLocaleDateString('es-CO') : '', _sucNames[_itemSucursal(g)] || '']);
                     rows = [...saleRows, ...gastoRows].sort((a,b) => new Date(b[5]) - new Date(a[5]));
-                    filename = `ventas_${rangeSlug}`;
+                    filename = `ventas_${rangeSlug}_${_exportSucursalSlug()}`;
                 } else if (type === 'inventario') {
-                    const stock = await getAll('stock');
-                    headers = ['Nombre','Categoría','Código','Cantidad','Mínimo','Precio Venta','Precio Costo','Estado'];
+                    const stock = _applyExportSucursalFilter(await getAll('stock'));
+                    headers = ['Nombre','Categoría','Código','Cantidad','Mínimo','Precio Venta','Precio Costo','Estado','Sucursal'];
+                    const _sucNames = getSucursalNames();
                     rows = stock.map(s => [
                         s.n||'', s.cat||'', s.code||'', s.q||0, s.minStock||0,
                         s.p||0, s.cost||0,
-                        (s.q||0) <= (s.minStock||0) ? 'BAJO MÍNIMO' : 'OK'
+                        (s.q||0) <= (s.minStock||0) ? 'BAJO MÍNIMO' : 'OK',
+                        _sucNames[_itemSucursal(s)] || ''
                     ]);
-                    filename = `inventario_${dateStr}`;
+                    filename = `inventario_${dateStr}_${_exportSucursalSlug()}`;
                 } else if (type === 'reporte') {
-                    const orders = await getAll('orders');
-                    const sales = await getAll('sales');
-                    const gastos = await getAll('gastos') || [];
-                    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-                    const monthOrders = orders.filter(o => o.sta === 'entregado' && (o.fechaEntrega || o.fecha) >= startOfMonth);
-                    const monthSales = sales.filter(s => s.fecha >= startOfMonth && s.tipo !== 'adelanto' && s.tipo !== 'cobro_entrega');
-                    const monthGastos = gastos.filter(g => g.fecha >= startOfMonth);
-                    const totalRep = monthOrders.reduce((a,b) => a+(b.val||0), 0);
-                    const totalVentas = monthSales.reduce((a,b) => a+(b.val||0), 0);
-                    const totalGastos = monthGastos.reduce((a,b) => a+(b.val||0), 0);
+                    const orders = _applyExportSucursalFilter(await getAll('orders'));
+                    const sales  = _applyExportSucursalFilter(await getAll('sales'));
+                    const gastos = _applyExportSucursalFilter((await getAll('gastos')) || []);
+                    const { label: rangeLabel } = _getExportRange();
+                    const sucName = _exportSucursalFilter === 'all'
+                        ? 'Todas las sedes'
+                        : (getSucursalNames()[_exportSucursalFilter] || ('Sede ' + _exportSucursalFilter));
+                    const periodOrders = orders.filter(o => o.sta === 'entregado' && (o.fechaEntrega || o.fecha || 0) >= from && (o.fechaEntrega || o.fecha || 0) <= to);
+                    const periodSales  = sales.filter(s => (s.fecha || 0) >= from && (s.fecha || 0) <= to && s.tipo !== 'adelanto' && s.tipo !== 'cobro_entrega');
+                    const periodGastos = gastos.filter(g => (g.fecha || 0) >= from && (g.fecha || 0) <= to);
+                    const totalRep    = periodOrders.reduce((a,b) => a+(b.val||0), 0);
+                    const totalVentas = periodSales.reduce((a,b) => a+(b.val||0), 0);
+                    const totalGastos = periodGastos.reduce((a,b) => a+(b.val||0), 0);
                     const neto = totalRep + totalVentas - totalGastos;
                     headers = ['Concepto','Valor'];
                     rows = [
-                        ['Mes', meses[now.getMonth()] + ' ' + now.getFullYear()],
+                        ['Sucursal', sucName],
+                        ['Periodo', rangeLabel],
                         ['Ingresos Reparaciones', totalRep],
                         ['Ingresos Ventas Stock', totalVentas],
                         ['Total Gastos', totalGastos],
                         ['GANANCIA NETA', neto],
-                        ['Órdenes entregadas este mes', monthOrders.length],
-                        ['Órdenes en proceso', orders.filter(o => o.sta !== 'entregado' && o.sta !== 'cancelado').length],
-                        ['Ticket promedio', monthOrders.length ? Math.round(totalRep/monthOrders.length) : 0],
+                        ['Órdenes entregadas en el periodo', periodOrders.length],
+                        ['Órdenes en proceso (actual)', orders.filter(o => o.sta !== 'entregado' && o.sta !== 'cancelado').length],
+                        ['Ticket promedio', periodOrders.length ? Math.round(totalRep/periodOrders.length) : 0],
                     ];
-                    filename = `reporte_mes_${dateStr}`;
+                    filename = `reporte_${rangeSlug}_${_exportSucursalSlug()}`;
                 }
 
                 // Si no hay datos para exportar, avisar y salir (evita PDF/Excel vacíos)
